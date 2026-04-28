@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { UploadCloud, FileVideo, CheckCircle } from "lucide-react";
+import { FileVideo, CheckCircle } from "lucide-react";
 
 export default function VideoUploader({ onUploadComplete }: { onUploadComplete: (url: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -17,9 +17,9 @@ export default function VideoUploader({ onUploadComplete }: { onUploadComplete: 
   const handleUpload = async () => {
     if (!file) return;
     setUploading(true);
+    setProgress(0);
 
     try {
-      // 1. Get the Presigned URL from our Next.js backend
       const res = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -29,8 +29,8 @@ export default function VideoUploader({ onUploadComplete }: { onUploadComplete: 
       const { presignedUrl, publicUrl, error } = await res.json();
       if (error) throw new Error(error);
 
-      // 2. Upload the video DIRECTLY to AWS S3 using XMLHttpRequest (to track progress)
-      return new Promise((resolve, reject) => {
+      // AWAIT the XHR directly to AWS
+      await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         
         xhr.upload.onprogress = (event) => {
@@ -42,8 +42,8 @@ export default function VideoUploader({ onUploadComplete }: { onUploadComplete: 
 
         xhr.onload = () => {
           if (xhr.status === 200) {
-            onUploadComplete(publicUrl); // Pass the final video URL back to the parent component
-            resolve(true);
+            onUploadComplete(publicUrl); 
+            resolve(true); 
           } else {
             reject("Upload failed at AWS");
           }
@@ -59,11 +59,9 @@ export default function VideoUploader({ onUploadComplete }: { onUploadComplete: 
     } catch (error) {
       console.error(error);
       alert("Failed to upload video.");
-    } finally {
       setUploading(false);
       setFile(null);
-      setProgress(0);
-    }
+    } 
   };
 
   return (
