@@ -1,23 +1,29 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import connectMongo from "@/lib/mongodb";
 import User from "@/models/User";
-import bcrypt from "bcryptjs";
+import VerificationToken from "@/models/VerificationToken"; // The OTP Vault
 
 export async function POST(req: Request) {
   try {
-    // 1. Connect to the database
     await connectMongo();
     
-    // 2. Get the data submitted from the frontend form
-    const { name, email, password, role, inviteCode } = await req.json();
+    // Grab all the data, including the OTP and inviteCode
+    const { name, email, password, role, inviteCode, otp } = await req.json();
 
-    // 3. Check if a user with this email already exists
+    // 1. VERIFY THE OTP FIRST
+    const validToken = await VerificationToken.findOne({ email, code: otp, purpose: 'signup' });
+    if (!validToken) {
+      return NextResponse.json({ error: "Invalid or expired verification code." }, { status: 400 });
+    }
+
+    // 2. CHECK IF USER ALREADY EXISTS
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return NextResponse.json({ error: "Email already in use" }, { status: 400 });
     }
 
-    // 4. Security Check: Block unauthorized tutor signups
+    // 3. SECURE TUTOR SIGNUPS
     if (role === 'tutor') {
       const actualSecretCode = process.env.TUTOR_SECRET_CODE;
       if (inviteCode !== actualSecretCode) {
@@ -25,26 +31,36 @@ export async function POST(req: Request) {
       }
     }
 
-    // 5. Secure the password
+   // 4. SECURE PASSWORD & HANDLE PREMIUM PROMO
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // 6. The "First 100 Students" Logic!
+    
     let isPremium = false;
+    let premiumExpiresAt = null; // Prepare the timer variable
+
     if (role === 'student') {
       const studentCount = await User.countDocuments({ role: 'student' });
       if (studentCount < 100) {
-        isPremium = true; // Boom! Free premium access granted.
+        isPremium = true; 
+        
+        // BOOM: Set the expiration date to exactly 30 days from right now
+        const thirtyDaysFromNow = new Date();
+        thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+        premiumExpiresAt = thirtyDaysFromNow;
       }
     }
 
-    // 7. Save the user to the database
+    // 5. CREATE THE USER
     const newUser = await User.create({
       name,
       email,
       password: hashedPassword,
       role,
-      isPremium
+      isPremium,
+      premiumExpiresAt
     });
+
+    // 6. CLEAN UP: Delete the OTP so it can't be used again
+    await VerificationToken.deleteOne({ _id: validToken._id });
 
     return NextResponse.json(
       { message: "Account created successfully!", isPremium: newUser.isPremium }, 

@@ -50,6 +50,9 @@ export default function TutorDashboard() {
     }
   };
 
+
+
+
   useEffect(() => {
     fetchVideos();
     fetchLiveClasses();
@@ -140,6 +143,9 @@ export default function TutorDashboard() {
       alert("Something went wrong.");
     }
   };
+
+  const upcoming = upcomingClasses.filter(c => new Date(c.scheduledAt) >= new Date() && !c.isCompleted);
+  const past = upcomingClasses.filter(c => new Date(c.scheduledAt) < new Date() || c.isCompleted);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -275,6 +281,63 @@ export default function TutorDashboard() {
                     <Trash2 className="h-4 w-4" /> Cancel
                   </button>
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* --- NEW SECTION: Past Classes & Recordings (NO PLAYBACK) --- */}
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-6 mt-8">
+        <h2 className="text-xl font-bold flex items-center gap-2 mb-6 dark:text-white">
+          <UploadCloud className="text-blue-600" /> Upload Live Recordings
+        </h2>
+        
+        {past.length === 0 ? (
+          <p className="text-gray-500 dark:text-gray-400 text-center py-8">No past classes found.</p>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {past.map((liveClass) => (
+              <div key={liveClass._id} className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-800 flex flex-col justify-between transition-all">
+                
+                <div className="mb-4">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded-md mb-2 inline-block">
+                    {liveClass.subject}
+                  </span>
+                  <h3 className="font-bold text-gray-900 dark:text-white">{liveClass.topic}</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Streamed on {new Date(liveClass.scheduledAt).toLocaleDateString()}
+                  </p>
+                </div>
+
+                {liveClass.recordingUrl ? (
+                   // SECURE STATE: Recording uploaded, NO player shown.
+                   <div className="bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 border border-green-200 dark:border-green-800/50">
+                     <CheckCircle className="h-4 w-4" /> Recording Published
+                   </div>
+                ) : (
+                  // UPLOAD STATE: Waiting for tutor to paste AWS/Storage URL
+                  // Note: You can replace this simple prompt with your <VideoUploader /> component if you prefer!
+                  <button 
+                    onClick={async () => {
+                      const url = window.prompt("Paste the secure recording URL here:");
+                      if (!url) return;
+                      
+                      const res = await fetch(`/api/live-classes/${liveClass._id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ recordingUrl: url })
+                      });
+                      if (res.ok) {
+                        alert("Recording saved!");
+                        fetchLiveClasses(); // Refresh list
+                      }
+                    }}
+                    className="bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 px-4 py-2 rounded-lg text-sm font-bold transition-colors text-center"
+                  >
+                    Attach Recording Link
+                  </button>
+                )}
               </div>
             ))}
           </div>

@@ -8,6 +8,7 @@ const UserSchema = new mongoose.Schema({
   isPremium: { type: Boolean, default: false },
   premiumExpiresAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
+  
 });
 
 // If the model already exists, use it. Otherwise, create a new one.
