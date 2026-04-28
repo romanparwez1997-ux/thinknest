@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import connectMongo from "@/lib/mongodb";
 import VerificationToken from "@/models/VerificationToken";
 import { sendEmail } from "@/lib/mail";
+import User from "@/models/User";
 
 export async function POST(req: Request) {
   try {
@@ -11,19 +12,38 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Email and purpose are required." }, { status: 400 });
     }
 
+    await connectMongo();
+
+    // 🛑 CONDITIONAL USER CHECKS based on purpose
+    const existingUser = await User.findOne({ email });
+
+    // If they are signing up, block duplicates
+    if (purpose === "signup" && existingUser) {
+      return NextResponse.json(
+        { error: "An account with this email already exists. Please log in." },
+        { status: 400 }
+      );
+    }
+
+    // If they are logging in, block non-existent users
+    if (purpose === "2fa" && !existingUser) {
+      return NextResponse.json(
+        { error: "No account found with this email. Please sign up." },
+        { status: 400 }
+      );
+    }
+
     // 1. Generate a random 6-digit code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-    await connectMongo();
-
-    // 2. Delete any existing codes for this email so they don't pile up
+    // 2. Delete any existing codes for this email and purpose so they don't pile up
     await VerificationToken.deleteMany({ email, purpose });
 
-    // 3. Save the new code to our Vault (expires in 10 mins automatically)
+    // 3. Save to database with a 10-minute expiration
     await VerificationToken.create({
       email,
-      code,
-      purpose,
+      code, // Fixed variable name mismatch
+      purpose, // Use dynamic purpose ("signup" or "2fa")
     });
 
     // 4. Send the email

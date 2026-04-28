@@ -1,74 +1,88 @@
-import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
-import connectMongo from "@/lib/mongodb";
-import User from "@/models/User";
-import VerificationToken from "@/models/VerificationToken"; // The OTP Vault
+import { NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
+import connectMongo from '@/lib/mongodb';
+import User from '@/models/User';
+import VerificationToken from '@/models/VerificationToken';
 
 export async function POST(req: Request) {
   try {
-    await connectMongo();
-    
-    // Grab all the data, including the OTP and inviteCode
     const { name, email, password, role, inviteCode, otp } = await req.json();
 
-    // 1. VERIFY THE OTP FIRST
-    const validToken = await VerificationToken.findOne({ email, code: otp, purpose: 'signup' });
-    if (!validToken) {
-      return NextResponse.json({ error: "Invalid or expired verification code." }, { status: 400 });
+    if (!name || !email || !password || !role || !otp) {
+      return NextResponse.json({ error: "All fields are required" }, { status: 400 });
     }
 
-    // 2. CHECK IF USER ALREADY EXISTS
+    await connectMongo();
+
+    // 🛑 1. DOUBLE-CHECK FOR DUPLICATE EMAIL
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return NextResponse.json({ error: "Email already in use" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Email is already registered. Please log in." }, 
+        { status: 400 }
+      );
     }
 
-    // 3. SECURE TUTOR SIGNUPS
+    // 🛑 2. SECURE SERVER-SIDE TUTOR CODE VALIDATION
     if (role === 'tutor') {
-      const actualSecretCode = process.env.TUTOR_SECRET_CODE;
-      if (inviteCode !== actualSecretCode) {
-        return NextResponse.json({ error: "Invalid Tutor Invite Code" }, { status: 403 });
+      // We check the code they typed against the secure environment variable
+      if (inviteCode !== process.env.TUTOR_SECRET_CODE) {
+        return NextResponse.json(
+          { error: "Invalid Tutor Invite Code. Please contact administration." }, 
+          { status: 403 }
+        );
       }
     }
 
-   // 4. SECURE PASSWORD & HANDLE PREMIUM PROMO
+    // 3. VERIFY THE OTP
+    const validToken = await VerificationToken.findOne({
+      email,
+      code: otp,
+      purpose: "signup"
+    });
+
+    if (!validToken) {
+      return NextResponse.json({ error: "Invalid or expired OTP code." }, { status: 400 });
+    }
+
+    // 4. CLEAN UP USED OTP
+    await VerificationToken.deleteOne({ _id: validToken._id });
+
+    // 5. SECURE PASSWORD & HANDLE 30-DAY PROMO
     const hashedPassword = await bcrypt.hash(password, 10);
     
     let isPremium = false;
-    let premiumExpiresAt = null; // Prepare the timer variable
+    let premiumExpiresAt = null;
 
     if (role === 'student') {
       const studentCount = await User.countDocuments({ role: 'student' });
       if (studentCount < 100) {
         isPremium = true; 
         
-        // BOOM: Set the expiration date to exactly 30 days from right now
+        // 30 days from now
         const thirtyDaysFromNow = new Date();
         thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
         premiumExpiresAt = thirtyDaysFromNow;
       }
     }
 
-    // 5. CREATE THE USER
+    // 6. CREATE THE USER
     const newUser = await User.create({
       name,
       email,
       password: hashedPassword,
       role,
       isPremium,
-      premiumExpiresAt
+      premiumExpiresAt 
     });
 
-    // 6. CLEAN UP: Delete the OTP so it can't be used again
-    await VerificationToken.deleteOne({ _id: validToken._id });
-
     return NextResponse.json(
-      { message: "Account created successfully!", isPremium: newUser.isPremium }, 
+      { message: "Account created successfully!", role: newUser.role }, 
       { status: 201 }
     );
 
   } catch (error) {
     console.error("Registration Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    return NextResponse.json({ error: "Something went wrong during registration." }, { status: 500 });
   }
 }
