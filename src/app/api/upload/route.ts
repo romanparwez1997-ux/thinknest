@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   try {
     // 1. Security: Only let Tutors upload videos
     const session = await getServerSession(authOptions);
-    if (session?.user?.role !== "tutor") {
+    if ((session?.user as any)?.role !== "tutor") {
       return NextResponse.json({ error: "Unauthorized. Tutors only." }, { status: 401 });
     }
 
