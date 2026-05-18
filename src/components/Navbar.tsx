@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useSession, signOut } from 'next-auth/react';
 import { usePathname, useRouter } from 'next/navigation';
-import { BookOpen, LogOut, LayoutDashboard, ChevronDown, Menu, X } from 'lucide-react';
+import { BookOpen, LogOut, LayoutDashboard, ChevronDown, Menu, X, Users } from 'lucide-react'; // Added Users icon
 
 export default function Navbar() {
   const { data: session, status } = useSession();
@@ -34,7 +34,7 @@ export default function Navbar() {
 
   const handleLogoClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    setIsMobileMenuOpen(false); // Close mobile menu if open
+    setIsMobileMenuOpen(false); 
     
     if (session?.user) {
       const targetDashboard = isTutor ? '/tutor/dashboard' : '/student/dashboard';
@@ -63,21 +63,22 @@ export default function Navbar() {
             <span className="font-extrabold text-xl tracking-tight text-gray-900 dark:text-white">ThinkNest</span>
           </button>
 
-          {/* MIDDLE: Desktop Links (Hidden on Mobile) */}
+          {/* MIDDLE: Desktop Links */}
           <div className="hidden md:flex items-center gap-8 font-medium">
             <Link href="/courses" className="text-gray-600 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-400 transition-colors">Courses</Link>
             <Link href="/live-classes" className="text-gray-600 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-400 transition-colors">Live Classes</Link>
             
-            {/* ONLY show Pricing if they are NOT a tutor */}
             {!isTutor && (
-              <Link href="/pricing" className="text-gray-600 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-400 transition-colors">Pricing</Link>
+              <>
+                <Link href="/student/tests" className="text-gray-600 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-400 transition-colors">Mock Tests</Link>
+                <Link href="/pricing" className="text-gray-600 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-400 transition-colors">Pricing</Link>
+              </>
             )}
           </div>
 
           {/* RIGHT: Profile/Login & Mobile Toggle */}
           <div className="flex items-center gap-4">
             
-            {/* Desktop Auth/Profile (Hidden on Mobile) */}
             <div className="hidden md:flex items-center gap-4">
               {status === "loading" ? (
                 <div className="h-10 w-24 bg-gray-200 dark:bg-gray-800 animate-pulse rounded-full"></div>
@@ -110,6 +111,17 @@ export default function Navbar() {
                       >
                         <LayoutDashboard className="h-4 w-4 text-gray-400" /> Dashboard
                       </Link>
+
+                      {/* 🔥 NEW: Student List Link for Tutors (Desktop) */}
+                      {isTutor && (
+                        <Link 
+                          href="/tutor/students" 
+                          onClick={() => setDropdownOpen(false)}
+                          className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                        >
+                          <Users className="h-4 w-4 text-blue-500" /> Student List
+                        </Link>
+                      )}
                       
                       <button 
                         onClick={() => signOut({ callbackUrl: '/' })} 
@@ -128,7 +140,6 @@ export default function Navbar() {
               )}
             </div>
 
-            {/* Mobile Menu Toggle Button (Hidden on Desktop) */}
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="md:hidden p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors focus:outline-none"
@@ -144,31 +155,16 @@ export default function Navbar() {
       {isMobileMenuOpen && (
         <div className="md:hidden absolute w-full bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 shadow-xl">
           <div className="px-4 pt-2 pb-6 space-y-1 flex flex-col">
-            <Link 
-              href="/courses" 
-              onClick={() => setIsMobileMenuOpen(false)}
-              className="block px-3 py-3 rounded-lg text-base font-medium text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
-            >
-              Courses
-            </Link>
-            <Link 
-              href="/live-classes" 
-              onClick={() => setIsMobileMenuOpen(false)}
-              className="block px-3 py-3 rounded-lg text-base font-medium text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
-            >
-              Live Classes
-            </Link>
+            <Link href="/courses" onClick={() => setIsMobileMenuOpen(false)} className="block px-3 py-3 rounded-lg text-base font-medium text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors">Courses</Link>
+            <Link href="/live-classes" onClick={() => setIsMobileMenuOpen(false)} className="block px-3 py-3 rounded-lg text-base font-medium text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors">Live Classes</Link>
+            
             {!isTutor && (
-              <Link 
-                href="/pricing" 
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="block px-3 py-3 rounded-lg text-base font-medium text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
-              >
-                Pricing
-              </Link>
+              <>
+                <Link href="/student/tests" onClick={() => setIsMobileMenuOpen(false)} className="block px-3 py-3 rounded-lg text-base font-medium text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors">Mock Tests</Link>
+                <Link href="/pricing" onClick={() => setIsMobileMenuOpen(false)} className="block px-3 py-3 rounded-lg text-base font-medium text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors">Pricing</Link>
+              </>
             )}
 
-            {/* Mobile Auth Section */}
             {session?.user ? (
               <div className="pt-4 mt-2 border-t border-gray-100 dark:border-gray-800">
                 <div className="px-3 pb-3">
@@ -182,6 +178,18 @@ export default function Navbar() {
                 >
                   <LayoutDashboard className="h-5 w-5 text-gray-400" /> Dashboard
                 </Link>
+
+                {/* 🔥 NEW: Student List Link for Tutors (Mobile) */}
+                {isTutor && (
+                  <Link 
+                    href="/admin/students" 
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-3 py-3 rounded-lg text-base font-medium text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
+                  >
+                    <Users className="h-5 w-5 text-blue-500" /> Student List
+                  </Link>
+                )}
+
                 <button 
                   onClick={() => { setIsMobileMenuOpen(false); signOut({ callbackUrl: '/' }); }}
                   className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-base font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors text-left"
@@ -191,20 +199,8 @@ export default function Navbar() {
               </div>
             ) : (
               <div className="pt-4 mt-2 border-t border-gray-100 dark:border-gray-800 flex flex-col gap-3 px-3">
-                <Link 
-                  href="/login" 
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="w-full text-center text-gray-800 dark:text-gray-200 font-bold py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                >
-                  Log in
-                </Link>
-                <Link 
-                  href="/register" 
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg transition-colors"
-                >
-                  Sign up
-                </Link>
+                <Link href="/login" onClick={() => setIsMobileMenuOpen(false)} className="w-full text-center text-gray-800 dark:text-gray-200 font-bold py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Log in</Link>
+                <Link href="/register" onClick={() => setIsMobileMenuOpen(false)} className="w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg transition-colors">Sign up</Link>
               </div>
             )}
           </div>

@@ -1,251 +1,318 @@
-"use client";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { redirect } from "next/navigation";
+import connectMongo from "@/lib/mongodb";
+import TestAttempt from "@/models/TestAttempt";
+import VideoProgress from "@/models/VideoProgess";
+import LiveSession from "@/models/LiveSession"; 
+import Link from "next/link";
+import { PlayCircle, Trophy, Target, Clock, Flame, CheckCircle2, BookOpen, Radio, Calendar, ExternalLink } from "lucide-react";
 
-import { useState, useEffect } from 'react';
-import { useSession } from 'next-auth/react';
-import { PlayCircle, Clock, BookOpen, Lock, Unlock, ShieldAlert } from 'lucide-react';
-import Link from 'next/link';
+export const dynamic = "force-dynamic";
 
-export default function StudentDashboard() {
-  const { data: session } = useSession();
+// 🔥 THE FIX: The smart extractor that pulls the real URL out of a copied text block
+const extractMeetingLink = (text: string) => {
+  if (!text) return "#";
+
+  // 1. Try to find a standard http:// or https:// link hidden anywhere in the text
+  const urlRegex = /(https?:\/\/[^\s]+)/;
+  const match = text.match(urlRegex);
+  if (match) return match[0]; 
+
+  // 2. If they forgot https://, scan for raw Google Meet links
+  const meetRegex = /(meet\.google\.com\/[^\s]+)/;
+  const meetMatch = text.match(meetRegex);
+  if (meetMatch) return `https://${meetMatch[0]}`;
+
+  // 3. Scan for raw Zoom links (e.g. us04web.zoom.us/j/...)
+  const zoomRegex = /([a-zA-Z0-9-]+\.zoom\.us\/[^\s]+)/;
+  const zoomMatch = text.match(zoomRegex);
+  if (zoomMatch) return `https://${zoomMatch[0]}`;
+
+  // 4. If it's just a single string without spaces, just slap https:// on it
+  if (!text.trim().includes(" ")) {
+    return `https://${text.trim()}`;
+  }
+
+  // Fallback if absolutely no link is found in the text
+  return "#"; 
+};
+
+export default async function StudentDashboard() {
+  const session = await getServerSession(authOptions);
+
+  if (!session || (session.user as any).role !== "student") {
+    redirect("/login");
+  }
+
+  const userId = (session.user as any).id;
+  await connectMongo();
+
+  // 1. FETCH REAL TEST DATA
+  const attempts = await TestAttempt.find({ studentId: userId })
+    .sort({ createdAt: -1 })
+    .populate({ path: 'testId', select: 'title' })
+    .lean();
+
+  const totalTestsTaken = attempts.length;
+  let averageScore = 0;
   
-  // ALL State declarations must be at the top!
-  const [groupedVideos, setGroupedVideos] = useState<Record<string, any[]>>({});
-  const [totalLectures, setTotalLectures] = useState(0);
-  const [loading, setLoading] = useState(true);
-  
-  // NEW: State for Tabs and Recordings
-  const [activeTab, setActiveTab] = useState<'courses' | 'archives'>('courses');
-  const [recordings, setRecordings] = useState<any[]>([]);
+  if (totalTestsTaken > 0) {
+    const totalPercentage = attempts.reduce((acc: number, curr: any) => {
+      return acc + (curr.score / curr.totalQuestions) * 100;
+    }, 0);
+    averageScore = Math.round(totalPercentage / totalTestsTaken);
+  }
 
-  const user = session?.user as any;
-  const isPremium = user?.isPremium;
+  const recentAttempts = attempts.slice(0, 3);
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        // 1. Fetch Pre-Recorded Videos
-        const videoRes = await fetch(`/api/videos?timestamp=${Date.now()}`, { cache: 'no-store' });
-        const videoData = await videoRes.json();
-        
-        if (videoRes.ok) {
-          const videos = videoData.videos;
-          setTotalLectures(videos.length);
-          
-          // Group videos by Subject
-          const grouped = videos.reduce((acc: any, video: any) => {
-            const subject = video.subject || "General";
-            if (!acc[subject]) acc[subject] = [];
-            acc[subject].push(video);
-            return acc;
-          }, {});
-          
-          setGroupedVideos(grouped);
-        }
+  // 2. FETCH REAL VIDEO PROGRESS DATA
+  const allProgress = await VideoProgress.find({ studentId: userId }).lean();
+  const totalSecondsWatched = allProgress.reduce((acc, curr) => acc + (curr.progressSeconds || 0), 0);
+  const totalWatchMinutes = Math.floor(totalSecondsWatched / 60);
+  const uniqueDays = new Set(allProgress.map(p => new Date(p.updatedAt).toLocaleDateString())).size;
 
-        // 2. Fetch Live Classes (Recordings)
-        const liveRes = await fetch(`/api/live-classes?timestamp=${Date.now()}`, { cache: 'no-store' });
-        const liveData = await liveRes.json();
-        
-        if (liveRes.ok) {
-          // Only keep classes that have a recording URL attached by the tutor!
-          setRecordings(liveData.classes.filter((c: any) => c.recordingUrl));
-        }
+  const recentVideoProgress = await VideoProgress.findOne({ studentId: userId })
+    .sort({ updatedAt: -1 })
+    .populate({ path: 'videoId', select: 'title subject videoUrl' })
+    .lean();
 
-      } catch (error) {
-        console.error("Failed to fetch dashboard data");
-      } finally {
-        setLoading(false);
-      }
+  let continueWatching = null;
+  if (recentVideoProgress && recentVideoProgress.videoId) {
+    const video = recentVideoProgress.videoId as any;
+    const totalSecs = recentVideoProgress.totalSeconds || 1; 
+    const percentage = Math.min(100, Math.round((recentVideoProgress.progressSeconds / totalSecs) * 100));
+    const secondsLeft = Math.max(0, totalSecs - recentVideoProgress.progressSeconds);
+    const minsLeft = Math.ceil(secondsLeft / 60);
+
+    continueWatching = {
+      title: video.title,
+      subject: video.subject,
+      progressPercentage: percentage,
+      timeLeft: `${minsLeft} mins left`,
+      courseUrl: `/student/courses/${encodeURIComponent(video.subject)}` 
     };
+  }
 
-    fetchDashboardData();
-  }, []);
+  // 3. FETCH UPCOMING LIVE SESSIONS
+  const upcomingSessions = await LiveSession.find({
+    scheduledAt: { $gte: new Date() }
+  }).sort({ scheduledAt: 1 }).limit(2).lean();
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      
-      {/* Header Section */}
-      <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-            Welcome back, {user?.name?.split(' ')[0] || 'Student'}! 👋
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400">Pick up exactly where you left off.</p>
-        </div>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-8">
         
-        {/* Dynamic Premium Status Badge */}
-        <Link 
-          href={isPremium ? "#" : "/pricing"}
-          className={`px-4 py-2 rounded-xl border font-bold flex items-center gap-2 transition-transform hover:scale-105 ${isPremium ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800' : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800 shadow-sm cursor-pointer'}`}
-        >
-          {isPremium ? <><Unlock className="h-4 w-4"/> Premium Active</> : <><Lock className="h-4 w-4"/> Upgrade to Premium</>}
-        </Link>
-      </div>
-
-      {/* REAL Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-        <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-4">
-          <div className="p-4 bg-blue-50 dark:bg-blue-900/30 rounded-xl"><BookOpen className="text-blue-600 dark:text-blue-400 h-6 w-6"/></div>
+        {/* HEADER */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Available Subjects</p>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{Object.keys(groupedVideos).length}</p>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+              Welcome back, {session.user?.name?.split(' ')[0]}! 👋
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-1">Ready to crush your goals today?</p>
           </div>
-        </div>
-        
-        <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-4">
-          <div className="p-4 bg-orange-50 dark:bg-orange-900/30 rounded-xl"><PlayCircle className="text-orange-600 dark:text-orange-400 h-6 w-6"/></div>
-          <div>
-            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Total Video Lectures</p>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{totalLectures}</p>
-          </div>
-        </div>
-
-        {!isPremium && (
-          <div className="bg-gradient-to-br from-gray-900 to-gray-800 dark:from-gray-800 dark:to-gray-950 p-6 rounded-2xl shadow-lg border border-gray-700 flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm text-gray-300 font-medium flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-red-400"/> Limited Access</p>
-              <p className="text-lg font-bold text-white mt-1">Unlock all content</p>
+          {(session.user as any).isPremium ? (
+            <div className="inline-flex items-center gap-2 bg-gradient-to-r from-yellow-400 to-yellow-600 text-white px-4 py-2 rounded-full font-bold shadow-sm self-start md:self-auto text-sm">
+              <Trophy className="h-4 w-4" /> Premium Active
             </div>
-            <Link href="/pricing" className="bg-white text-gray-900 text-sm font-bold px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
-              Upgrade
-            </Link>
-          </div>
-        )}
-      </div>
-
-      {/* --- TABS NAVIGATION --- */}
-      <div className="flex gap-6 border-b border-gray-200 dark:border-gray-800 mb-8">
-        <button 
-          onClick={() => setActiveTab('courses')}
-          className={`pb-4 px-2 font-bold transition-colors border-b-2 text-lg ${activeTab === 'courses' ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-        >
-          Pre-Recorded Courses
-        </button>
-        <button 
-          onClick={() => setActiveTab('archives')}
-          className={`pb-4 px-2 font-bold transition-colors border-b-2 text-lg flex items-center gap-2 ${activeTab === 'archives' ? 'border-blue-600 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-        >
-          Live Class Archives {!isPremium && <Lock className="h-4 w-4" />}
-        </button>
-      </div>
-
-      {/* --- RENDER CONTENT BASED ON ACTIVE TAB --- */}
-      {loading ? (
-        <div className="text-center py-12 text-gray-500 dark:text-gray-400">Loading your personalized curriculum...</div>
-      ) : activeTab === 'courses' ? (
-        
-        // ==========================================
-        // TAB 1: PRE-RECORDED COURSES
-        // ==========================================
-        totalLectures === 0 ? (
-          <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800">
-            No pre-recorded classes available yet.
-          </div>
-        ) : (
-          <div className="space-y-12">
-            {Object.entries(groupedVideos).map(([subject, videos]) => (
-              <div key={subject}>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-2xl font-extrabold text-gray-900 dark:text-white flex items-center gap-2">
-                    {subject} <span className="text-sm font-medium text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full">{videos.length} Lectures</span>
-                  </h2>
-                  <Link href={`/student/courses/${subject}`} className="text-sm font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
-                    View All →
-                  </Link>
-                </div>
-
-                <div className="flex overflow-x-auto pb-4 gap-6 snap-x hide-scrollbar">
-                  {videos.map((video) => (
-                    <Link 
-                      href={`/student/courses/${encodeURIComponent(video.subject)}`} 
-                      key={video._id}
-                      className="snap-start flex-shrink-0 w-72 sm:w-80 group flex flex-col bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-xl transition-all overflow-hidden"
-                    >
-                      <div className="aspect-video bg-black relative overflow-hidden">
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                          <PlayCircle className="text-white h-12 w-12" />
-                        </div>
-                        {!isPremium && (
-                          <div className="absolute top-2 right-2 z-20 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-bold text-white uppercase tracking-wider flex items-center gap-1 border border-gray-600">
-                            <Unlock className="h-3 w-3 text-green-400" /> Free Preview
-                          </div>
-                        )}
-                        <video src={video.videoUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" preload="metadata"></video>
-                      </div>
-
-                      <div className="p-4 flex flex-col flex-grow">
-                        <h3 className="font-bold text-gray-900 dark:text-white line-clamp-2 mb-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                          {video.title}
-                        </h3>
-                        <div className="mt-auto flex items-center justify-between text-xs font-medium">
-                          <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                            <Clock className="h-3 w-3" /> {new Date(video.createdAt).toLocaleDateString()}
-                          </span>
-                          <span className={`px-2 py-1 rounded-md flex items-center gap-1 ${isPremium ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/20' : 'text-gray-700 bg-gray-100 dark:text-gray-300 dark:bg-gray-800'}`}>
-                            {isPremium ? 'Watch Full' : 'Watch Preview'}
-                          </span>
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )
-
-      ) : (
-
-        // ==========================================
-        // TAB 2: LIVE ARCHIVES (PREMIUM ONLY)
-        // ==========================================
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {!isPremium ? (
-            
-            // THE PAYWALL LOCK
-            <div className="col-span-full bg-gradient-to-br from-gray-900 to-black rounded-2xl p-12 text-center border border-gray-800 shadow-2xl relative overflow-hidden">
-              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-              <Lock className="h-16 w-16 text-blue-500 mx-auto mb-6 drop-shadow-lg" />
-              <h2 className="text-2xl font-extrabold text-white mb-4 z-10 relative">Premium Feature Locked</h2>
-              <p className="text-gray-400 max-w-md mx-auto mb-8 z-10 relative">
-                Missed a live class? Upgrade to Premium to unlock our entire vault of recorded live sessions and masterclasses.
-              </p>
-              <Link href="/pricing" className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-xl transition-transform hover:scale-105 z-10 relative shadow-xl">
-                Unlock Archives
-              </Link>
-            </div>
-
-          ) : recordings.length === 0 ? (
-            
-            // EMPTY STATE FOR PREMIUM USERS
-            <div className="col-span-full text-center py-12 text-gray-500 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800">
-              No live class recordings available yet.
-            </div>
-
           ) : (
-            
-            // ACTUAL RECORDINGS FOR PREMIUM USERS
-            recordings.map((rec) => (
-              <div key={rec._id} className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all flex flex-col">
-                <div className="aspect-video bg-gray-900 relative flex items-center justify-center group">
-                   <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors z-10"></div>
-                   <PlayCircle className="text-white h-12 w-12 z-20 opacity-80 group-hover:opacity-100 transition-opacity drop-shadow-md" />
-                   <div className="absolute bottom-2 right-2 bg-red-500 text-white text-[10px] font-bold uppercase px-2 py-1 rounded z-20">Recorded</div>
-                </div>
-                <div className="p-5 flex flex-col flex-grow">
-                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1">{rec.subject}</span>
-                  <h3 className="font-bold text-gray-900 dark:text-white mb-4 line-clamp-2">{rec.topic}</h3>
-                  
-                  <a href={rec.recordingUrl} target="_blank" rel="noopener noreferrer" className="mt-auto block w-full text-center bg-gray-50 dark:bg-gray-800 hover:bg-blue-600 hover:text-white text-gray-900 dark:text-white text-sm font-bold py-2.5 rounded-lg transition-colors border border-gray-200 dark:border-gray-700 hover:border-blue-600">
-                    Watch Recording
-                  </a>
-                </div>
-              </div>
-            ))
+            <Link href="/pricing" className="inline-flex items-center gap-2 bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-700 px-4 py-2 rounded-full font-bold transition-colors self-start md:self-auto text-sm">
+              Upgrade to Premium
+            </Link>
           )}
         </div>
-      )}
 
+        {/* STATS GRID */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-3 mb-2 text-gray-500 dark:text-gray-400 font-medium">
+              <Target className="h-5 w-5 text-blue-500" /> Avg Score
+            </div>
+            <div className="text-3xl font-extrabold text-gray-900 dark:text-white">{averageScore}%</div>
+          </div>
+          <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-3 mb-2 text-gray-500 dark:text-gray-400 font-medium">
+              <CheckCircle2 className="h-5 w-5 text-green-500" /> Tests Taken
+            </div>
+            <div className="text-3xl font-extrabold text-gray-900 dark:text-white">{totalTestsTaken}</div>
+          </div>
+          <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-3 mb-2 text-gray-500 dark:text-gray-400 font-medium">
+              <Flame className="h-5 w-5 text-orange-500" /> Days Active
+            </div>
+            <div className="text-3xl font-extrabold text-gray-900 dark:text-white">{uniqueDays}</div>
+          </div>
+          <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-3 mb-2 text-gray-500 dark:text-gray-400 font-medium">
+              <Clock className="h-5 w-5 text-purple-500" /> Time Watched
+            </div>
+            <div className="text-3xl font-extrabold text-gray-900 dark:text-white">{Math.floor(totalWatchMinutes / 60)}<span className="text-lg font-medium text-gray-500 ml-1">hrs</span></div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* MAIN COLUMN */}
+          <div className="lg:col-span-2 space-y-8">
+            
+            {/* CONTINUE WATCHING CARD */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <PlayCircle className="h-6 w-6 text-blue-600 dark:text-blue-500" /> Continue Learning
+                </h2>
+                <Link href="/courses" className="text-sm font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400">View All</Link>
+              </div>
+              
+              {continueWatching ? (
+                <Link href={continueWatching.courseUrl} className="block bg-white dark:bg-gray-900 rounded-3xl p-6 border border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-md transition-shadow group">
+                  <div className="flex flex-col md:flex-row gap-6 items-start md:items-center">
+                    <div className="w-full md:w-48 h-28 bg-gray-100 dark:bg-gray-800 rounded-xl relative overflow-hidden flex-shrink-0 flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
+                      <PlayCircle className="h-10 w-10 text-gray-400 dark:text-gray-600 group-hover:text-blue-500 transition-colors" />
+                      <div className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-sm text-white text-xs font-bold px-2 py-1 rounded-md">
+                        {continueWatching.timeLeft}
+                      </div>
+                    </div>
+                    <div className="flex-grow w-full">
+                      <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-md mb-2 inline-block">
+                        {continueWatching.subject}
+                      </span>
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 line-clamp-1">
+                        {continueWatching.title}
+                      </h3>
+                      <div className="flex items-center justify-between text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
+                        <span>Progress</span>
+                        <span>{continueWatching.progressPercentage}%</span>
+                      </div>
+                      <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2.5 overflow-hidden">
+                        <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${continueWatching.progressPercentage}%` }}></div>
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              ) : (
+                <div className="bg-white dark:bg-gray-900 rounded-3xl p-8 border border-gray-200 dark:border-gray-800 shadow-sm text-center">
+                  <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Ready to start learning?</h3>
+                  <p className="text-gray-500 dark:text-gray-400 mb-6">You don't have any courses in progress right now. Pick a subject and jump in!</p>
+                  <Link href="/courses" className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-bold transition-colors inline-block">
+                    Browse Courses
+                  </Link>
+                </div>
+              )}
+            </div>
+
+            {/* MILESTONE / LEARNING PATH */}
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl p-8 text-white shadow-md relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+              <div className="relative z-10">
+                <h3 className="text-xl font-bold mb-2">Next Milestone: Test Master</h3>
+                <p className="text-blue-100 mb-6 max-w-md">Complete {Math.max(0, 5 - totalTestsTaken)} more tests to unlock your first academic badge.</p>
+                <div className="flex items-center gap-4">
+                  <div className="flex-grow bg-black/20 rounded-full h-3">
+                    <div className="bg-white h-3 rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (totalTestsTaken / 5) * 100)}%` }}></div>
+                  </div>
+                  <span className="font-bold">{totalTestsTaken} / 5 Tests</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* RIGHT COLUMN */}
+          <div className="lg:col-span-1 space-y-8">
+            
+            {/* UPCOMING LIVE SESSIONS WIDGET */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Radio className="h-5 w-5 text-red-500" /> Live Classes
+                </h2>
+              </div>
+
+              {upcomingSessions.length === 0 ? (
+                <div className="text-center py-6">
+                  <div className="bg-gray-50 dark:bg-gray-800 h-14 w-14 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Calendar className="h-6 w-6 text-gray-400" />
+                  </div>
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">No upcoming classes scheduled.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {upcomingSessions.map((liveSession: any) => (
+                    <div key={liveSession._id.toString()} className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800">
+                      <span className="text-[10px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider bg-red-100 dark:bg-red-900/30 px-2 py-0.5 rounded-md mb-2 inline-block">
+                        {liveSession.subject}
+                      </span>
+                      <h4 className="font-bold text-gray-900 dark:text-white text-sm line-clamp-2 mb-2">
+                        {liveSession.topic || liveSession.title}
+                      </h4>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(liveSession.scheduledAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                      </p>
+                      
+                      {/* 🔥 THE FIX IS APPLIED RIGHT HERE 🔥 */}
+                      <a 
+                        href={extractMeetingLink(liveSession.meetingLink)} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-xl text-sm font-bold transition-colors shadow-sm"
+                      >
+                        Join Class <ExternalLink className="h-4 w-4" />
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* TEST HISTORY WIDGET */}
+            <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Recent Tests</h2>
+                <Link href="/student/tests" className="text-sm font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400">All Tests</Link>
+              </div>
+
+              {recentAttempts.length === 0 ? (
+                <div className="text-center py-6">
+                  <div className="bg-gray-50 dark:bg-gray-800 h-14 w-14 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Trophy className="h-6 w-6 text-gray-400" />
+                  </div>
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">You haven't taken any tests yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {recentAttempts.map((attempt: any) => {
+                    const percent = Math.round((attempt.score / attempt.totalQuestions) * 100);
+                    let colorClass = "text-green-600 bg-green-50 dark:bg-green-900/20";
+                    if (percent < 70) colorClass = "text-orange-600 bg-orange-50 dark:bg-orange-900/20";
+                    if (percent < 50) colorClass = "text-red-600 bg-red-50 dark:bg-red-900/20";
+
+                    return (
+                      <Link href="/student/tests" key={attempt._id.toString()} className="group flex items-center justify-between p-3 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-blue-300 transition-all cursor-pointer">
+                        <div className="flex-grow pr-3">
+                          <h4 className="font-bold text-gray-900 dark:text-white text-sm line-clamp-1 mb-1">
+                            {attempt.testId?.title || "Unknown Test"}
+                          </h4>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {new Date(attempt.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className={`px-2 py-1 rounded-lg font-bold text-xs flex-shrink-0 ${colorClass}`}>
+                          {attempt.score}/{attempt.totalQuestions}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+          </div>
+
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { Users, Video as VideoIcon, UploadCloud, CheckCircle, PlayCircle, Trash2, Calendar, Radio } from 'lucide-react';
+import { Users, Video as VideoIcon, UploadCloud, CheckCircle, PlayCircle, Trash2, Calendar, Radio, FileText } from 'lucide-react';
 import { useSession } from 'next-auth/react';
+import Link from 'next/link';
 import VideoUploader from '@/components/VideoUploader';
 
 export default function TutorDashboard() {
@@ -23,7 +24,7 @@ export default function TutorDashboard() {
   const [liveLink, setLiveLink] = useState('');
   const [scheduling, setScheduling] = useState(false);
   const [liveSuccessMsg, setLiveSuccessMsg] = useState('');
-  const [upcomingClasses, setUpcomingClasses] = useState<any[]>([]); // NEW: State for fetching classes
+  const [upcomingClasses, setUpcomingClasses] = useState<any[]>([]); 
 
   // Fetch Videos
   const fetchVideos = async () => {
@@ -42,16 +43,12 @@ export default function TutorDashboard() {
       const res = await fetch(`/api/live-classes?timestamp=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (res.ok) {
-        // Adjust this depending on what your API returns (e.g., data.classes or just data)
         setUpcomingClasses(data.classes || data || []);
       }
     } catch (error) {
       console.error("Failed to fetch live classes");
     }
   };
-
-
-
 
   useEffect(() => {
     fetchVideos();
@@ -114,7 +111,7 @@ export default function TutorDashboard() {
       setLiveTopic('');
       setLiveDate('');
       setLiveLink('');
-      fetchLiveClasses(); // Refresh the list instantly!
+      fetchLiveClasses(); 
     } catch (error) {
       alert("Failed to schedule the live class.");
     } finally {
@@ -153,7 +150,29 @@ export default function TutorDashboard() {
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
           Welcome back, {session?.user?.name || 'Tutor'}!
         </h1>
-        <p className="text-gray-600 dark:text-gray-400">Upload new lectures and manage your content.</p>
+        <p className="text-gray-600 dark:text-gray-400">Upload new lectures, schedule classes, and build exams.</p>
+      </div>
+
+      {/* --- NEW: MOCK TEST ENGINE BANNER --- */}
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-purple-200 dark:border-purple-900/50 p-6 mb-8 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+
+        <div className="flex items-center gap-4 z-10 w-full md:w-auto">
+          <div className="h-14 w-14 bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded-full flex items-center justify-center flex-shrink-0">
+            <FileText className="h-7 w-7" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Mock Test Engine</h2>
+            <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">Create automated, auto-graded multiple choice exams for your students.</p>
+          </div>
+        </div>
+
+        <Link 
+          href="/tutor/tests/create" 
+          className="w-full md:w-auto whitespace-nowrap bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md hover:shadow-lg z-10 flex items-center justify-center gap-2"
+        >
+          <FileText className="h-5 w-5" /> Launch Test Creator
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -241,7 +260,7 @@ export default function TutorDashboard() {
 
       </div>
 
-      {/* --- NEW SECTION: Manage Upcoming Live Classes --- */}
+      {/* --- SECTION: Manage Upcoming Live Classes --- */}
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-6 mt-8">
         <h2 className="text-xl font-bold flex items-center gap-2 mb-6 dark:text-white">
           <Radio className="text-red-500" /> My Upcoming Live Classes
@@ -287,7 +306,7 @@ export default function TutorDashboard() {
         )}
       </div>
 
-      {/* --- NEW SECTION: Past Classes & Recordings (NO PLAYBACK) --- */}
+      {/* --- SECTION: Past Classes & Recordings --- */}
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-6 mt-8">
         <h2 className="text-xl font-bold flex items-center gap-2 mb-6 dark:text-white">
           <UploadCloud className="text-blue-600" /> Upload Live Recordings
@@ -311,13 +330,10 @@ export default function TutorDashboard() {
                 </div>
 
                 {liveClass.recordingUrl ? (
-                   // SECURE STATE: Recording uploaded, NO player shown.
                    <div className="bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 border border-green-200 dark:border-green-800/50">
                      <CheckCircle className="h-4 w-4" /> Recording Published
                    </div>
                 ) : (
-                  // UPLOAD STATE: Waiting for tutor to paste AWS/Storage URL
-                  // Note: You can replace this simple prompt with your <VideoUploader /> component if you prefer!
                   <button 
                     onClick={async () => {
                       const url = window.prompt("Paste the secure recording URL here:");
@@ -330,7 +346,7 @@ export default function TutorDashboard() {
                       });
                       if (res.ok) {
                         alert("Recording saved!");
-                        fetchLiveClasses(); // Refresh list
+                        fetchLiveClasses(); 
                       }
                     }}
                     className="bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 px-4 py-2 rounded-lg text-sm font-bold transition-colors text-center"
@@ -344,8 +360,7 @@ export default function TutorDashboard() {
         )}
       </div>
 
-      {/* --- Display the list of uploaded videos! --- */}
-     {/* --- Display the list of uploaded videos (NO PLAYBACK ALLOWED) --- */}
+      {/* --- SECTION: Manage Published Lectures --- */}
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-6 mt-8">
         <h2 className="text-xl font-bold flex items-center gap-2 mb-6 dark:text-white">
           <VideoIcon className="text-blue-600" /> Manage Published Lectures
@@ -357,7 +372,6 @@ export default function TutorDashboard() {
             {publishedVideos.map((video) => (
               <div key={video._id} className="border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden hover:shadow-md transition-shadow bg-gray-50 dark:bg-gray-800/50 flex flex-col">
                 
-                {/* THE FIX: Static Thumbnail instead of Video Player */}
                 <div className="aspect-video bg-gradient-to-br from-blue-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 relative flex items-center justify-center border-b border-gray-100 dark:border-gray-800">
                   <VideoIcon className="h-10 w-10 text-blue-200 dark:text-gray-700" />
                   <div className="absolute top-3 right-3 bg-white/80 dark:bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700">
@@ -373,7 +387,6 @@ export default function TutorDashboard() {
                       <UploadCloud className="h-3 w-3" /> {new Date(video.createdAt).toLocaleDateString()}
                     </p>
                     
-                    {/* Only the Delete Action remains */}
                     <button 
                       onClick={() => handleDelete(video._id)} 
                       className="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 px-3 py-1.5 rounded-md transition-colors text-sm font-medium flex items-center gap-1"

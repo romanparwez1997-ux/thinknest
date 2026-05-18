@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
-import { Lock, PlayCircle } from 'lucide-react';
+import { Lock, PlayCircle, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import SecureVideoPlayer from '@/components/SecureVideoPlayer';
@@ -10,28 +10,26 @@ import SecureVideoPlayer from '@/components/SecureVideoPlayer';
 export default function CoursePlayerPage() {
   const { data: session } = useSession();
   const params = useParams();
-
-  console.log("🚨🚨🚨 YES, I AM EDITING THE CORRECT FILE! 🚨🚨🚨");
   
-  // THE FIX: We grab courseId from the URL (which holds the subject name like "Physics")
   const subjectName = decodeURIComponent(params.courseId as string);
   
   const [videos, setVideos] = useState<any[]>([]);
   const [activeVideo, setActiveVideo] = useState<any>(null);
+  
+  // New States for Progress Tracking
   const [loading, setLoading] = useState(true);
+  const [progressSeconds, setProgressSeconds] = useState(0);
+  const [fetchingProgress, setFetchingProgress] = useState(false);
 
-  // Check if the user is premium
-  // const isPremium = (session?.user as any)?.isPremium;
+  const isPremium = (session?.user as any)?.isPremium;
 
-  const isPremium = true; // 🔥 FORCING PREMIUM FOR TESTING
-
+  // 1. Fetch the Playlist
   useEffect(() => {
     const fetchVideos = async () => {
       try {
         const res = await fetch(`/api/videos?timestamp=${Date.now()}`, { cache: 'no-store' });
         const data = await res.json();
         if (res.ok) {
-          // Filter videos to only show the ones matching this subject
           const subjectVideos = data.videos.filter((v: any) => v.subject === subjectName);
           setVideos(subjectVideos);
           if (subjectVideos.length > 0) setActiveVideo(subjectVideos[0]);
@@ -45,27 +43,60 @@ export default function CoursePlayerPage() {
     fetchVideos();
   }, [subjectName]);
 
-  if (loading) return <div className="p-8 text-center dark:text-white">Loading curriculum...</div>;
+  // 2. Fetch their specific progress whenever the Active Video changes
+  useEffect(() => {
+    if (!activeVideo || !isPremium) return;
+
+    const fetchSavedProgress = async () => {
+      setFetchingProgress(true);
+      try {
+        const res = await fetch(`/api/progress/${activeVideo._id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setProgressSeconds(data.progressSeconds);
+        } else {
+          setProgressSeconds(0);
+        }
+      } catch (error) {
+        setProgressSeconds(0);
+      } finally {
+        setFetchingProgress(false);
+      }
+    };
+
+    fetchSavedProgress();
+  }, [activeVideo, isPremium]);
+
+  if (loading) return <div className="p-8 text-center dark:text-white flex items-center justify-center gap-2"><Loader2 className="animate-spin h-5 w-5" /> Loading curriculum...</div>;
   if (!activeVideo) return <div className="p-8 text-center dark:text-white">No lectures found for {subjectName}.</div>;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col lg:flex-row gap-8">
       
-      
-     {/* Left Side: The Video Player */}
+      {/* Left Side: The Video Player */}
       <div className="lg:w-2/3">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">{activeVideo.title}</h1>
         
         <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-lg border border-gray-200 dark:border-gray-800 relative">
           
           {isPremium ? (
-            <SecureVideoPlayer 
-              key={activeVideo._id} 
-              videoId={activeVideo._id.toString()} 
-              videoUrl={activeVideo.videoUrl} 
-              startAtSeconds={0} 
-            />
+            // PREMIUM USER: Wait for progress to load, then show the Secure Player
+            fetchingProgress ? (
+              <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 gap-3">
+                <Loader2 className="animate-spin h-8 w-8 text-blue-500" />
+                <p className="font-medium text-sm">Syncing your progress...</p>
+              </div>
+            ) : (
+              // Use the key prop to force React to mount a fresh player when the video changes
+              <SecureVideoPlayer 
+                key={activeVideo._id} 
+                videoId={activeVideo._id.toString()} 
+                videoUrl={activeVideo.videoUrl} 
+                startAtSeconds={progressSeconds} 
+              />
+            )
           ) : (
+            // FREE USER: 30-second preview with upgrade overlay (Untracked)
             <div className="relative w-full h-full group">
               <video 
                 src={`${activeVideo.videoUrl}#t=0,30`} 
@@ -76,9 +107,13 @@ export default function CoursePlayerPage() {
               <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center pointer-events-none group-hover:bg-black/70 transition-colors">
                 <Lock className="text-white h-12 w-12 mb-4 drop-shadow-md" />
                 <h3 className="text-white font-bold text-xl mb-4 drop-shadow-md">Premium Required for Full Access</h3>
-                <Link href="/pricing" className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-bold transition-transform hover:scale-105 pointer-events-auto shadow-xl">
+                <Link 
+                  href="/pricing" 
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-bold transition-transform hover:scale-105 pointer-events-auto shadow-xl"
+                >
                   Upgrade Now
                 </Link>
+                <p className="text-gray-300 text-sm mt-4 font-medium drop-shadow-md">Watching 30-second free preview</p>
               </div>
             </div>
           )}

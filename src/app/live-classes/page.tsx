@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "../api/auth/[...nextauth]/route";
 import connectMongo from "@/lib/mongodb";
 import LiveSession from "@/models/LiveSession";
+import { extractMeetingLink } from '@/lib/formatters';
 
 export const revalidate = 0; // Forces Next.js to never cache this page so the schedule is always accurate
 
@@ -57,7 +58,8 @@ export default async function LiveClassesPage() {
 
               <div className="w-full md:w-auto flex-shrink-0">
                 {isPremium ? (
-                  <a href={sessionItem.meetingLink} target="_blank" rel="noopener noreferrer" className="w-full md:w-auto bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-xl transition-all shadow-lg shadow-red-500/30 flex items-center justify-center gap-2">
+                  
+                  <a href={extractMeetingLink(sessionItem.meetingLink)} target="_blank" rel="noopener noreferrer" className="w-full md:w-auto bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-xl transition-all shadow-lg shadow-red-500/30 flex items-center justify-center gap-2">
                     <Video className="h-5 w-5" /> Join Stream
                   </a>
                 ) : (
